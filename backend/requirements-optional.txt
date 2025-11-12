@@ -1,0 +1,4 @@
+demucs>=4.0.1,<5.0.0
+faster-whisper>=1.0.3,<2.0.0
+pyphen>=0.15.0,<1.0.0
+torchcodec>=0.8.0,<1.0.0
