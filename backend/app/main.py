@@ -144,3 +144,138 @@ def export_project(export_format: str, project: RapRhythmProject) -> Response:
 
 
 @app.post("/api/demo", response_model=RapRhythmProject)
+def demo_project(request: DemoRequest) -> RapRhythmProject:
+    from app.models.schema import (
+        AcousticFeatures,
+        AnalysisPayload,
+        AnalyticsSummary,
+        AudioMetadata,
+        Beat,
+        CanonicalState,
+        ProjectMetadata,
+        QuantizationProfile,
+        RhythmEvent,
+        TempoMap,
+    )
+
+    bpm = 92.0
+    beats = [
+        Beat(
+            index=index,
+            time_seconds=index * 60.0 / bpm,
+            is_downbeat=index % 4 == 0,
+            confidence=0.9,
+            strength=0.7,
+        )
+        for index in range(32)
+    ]
+    bars = []
+    for index in range(8):
+        start = index * 4 * 60.0 / bpm
+        end = (index + 1) * 4 * 60.0 / bpm
+        from app.models.schema import Bar
+
+        bars.append(
+            Bar(
+                index=index,
+                start_seconds=start,
+                end_seconds=end,
+                beat_start_index=index * 4,
+                confidence=0.8,
+            )
+        )
+    tempo_map = TempoMap(bpm=bpm, beats=beats, bars=bars, confidence=0.9)
+    labels = [
+        "back",
+        "on",
+        "the",
+        "grid",
+        "but",
+        "lean",
+        "past",
+        "snare",
+        "trip",
+        "let",
+        "fall",
+        "in",
+    ]
+    events = []
+    for index, label in enumerate(labels):
+        start_beats = [0, 0.5, 1, 1.5, 4, 4.5, 5.25, 6, 8, 8 + 1 / 3, 8 + 2 / 3, 9.5][
+            index
+        ]
+        duration_beats = 0.5 if index not in {8, 9, 10} else 1 / 3
+        start_seconds = start_beats * 60.0 / bpm
+        events.append(
+            RhythmEvent(
+                label=label,
+                word=label,
+                syllable=label,
+                start_seconds=start_seconds,
+                duration_seconds=duration_beats * 60.0 / bpm,
+                end_seconds=start_seconds + duration_beats * 60.0 / bpm,
+                free_start_beats=start_beats,
+                free_duration_beats=duration_beats,
+                quantized_start_beats=start_beats,
+                quantized_duration_beats=duration_beats,
+                bar_index=int(start_beats // 4),
+                beat_index_within_bar=start_beats % 4,
+                subdivision_label="eighth-triplet" if index in {8, 9, 10} else "eighth",
+                accent=0.5 + (0.35 if start_beats % 1 == 0 else 0.0),
+                stress=0.5,
+                confidence=0.88,
+                source="fallback",
+                acoustic_features=AcousticFeatures(
+                    onset_strength=0.5, rms=0.2, spectral_centroid=1800
+                ),
+            )
+        )
+    analysis = AnalysisPayload(
+        tempo_map=tempo_map,
+        rhythm_events=events,
+        quantization_profiles=[
+            QuantizationProfile(
+                label="eighth",
+                subdivision_per_beat=2,
+                average_error_seconds=0.04,
+                confidence=0.8,
+            ),
+            QuantizationProfile(
+                label="eighth-triplet",
+                subdivision_per_beat=3,
+                supports_triplets=True,
+                average_error_seconds=0.03,
+                confidence=0.84,
+            ),
+        ],
+        analytics=AnalyticsSummary(
+            syllables_per_beat=1.5,
+            syllables_per_bar=6.0,
+            dominant_subdivision="eighth",
+            triplet_density=0.25,
+            syncopation_estimate=0.33,
+            accent_pattern_by_bar=[[0.85, 0.45, 0.7], [0.8, 0.55, 0.6]],
+        ),
+        warnings=["Demo project generated locally without audio."],
+    )
+    audio = AudioMetadata(
+        original_filename="demo.wav",
+        stored_filename="demo.wav",
+        stored_path="",
+        asset_url="",
+        duration_seconds=32 * 60.0 / bpm,
+        sample_rate=22050,
+        channels=2,
+        format="WAV",
+    )
+    return RapRhythmProject(
+        metadata=ProjectMetadata(name=request.project_name),
+        audio=audio,
+        lyrics_text="back on the grid but lean past snare trip let fall in",
+        raw_analysis=analysis,
+        canonical_state=CanonicalState(
+            tempo_map=tempo_map,
+            rhythm_events=events,
+            selected_quantization_profile_id=analysis.quantization_profiles[0].id,
+        ),
+    )
