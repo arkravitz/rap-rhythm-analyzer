@@ -102,3 +102,105 @@ export function addEvent(project: RapRhythmProject, atBeats: number): RapRhythmP
   return next;
 }
 
+export function applyQuantization(
+  project: RapRhythmProject,
+  label: string,
+  scope: "all" | "selected-bar"
+): RapRhythmProject {
+  const next = cloneProject(project);
+  const selected = next.canonical_state.rhythm_events.find((event) => event.id === next.ui_state.selected_event_id);
+  const selectedBar = selected?.bar_index ?? 0;
+  next.canonical_state.rhythm_events = next.canonical_state.rhythm_events.map((event) => {
+    if (scope === "selected-bar" && event.bar_index !== selectedBar) {
+      return event;
+    }
+    const candidate = event.quantization_candidates.find((item) => item.label === label);
+    if (!candidate) {
+      return event;
+    }
+    return recalculateEvent(
+      {
+        ...event,
+        subdivision_label: candidate.label,
+        quantized_start_beats: candidate.start_beats,
+        quantized_duration_beats: Math.max(candidate.duration_beats, event.quantized_duration_beats)
+      },
+      next.canonical_state.tempo_map
+    );
+  });
+  next.canonical_state.selected_quantization_profile_id =
+    next.raw_analysis.quantization_profiles.find((profile) => profile.label === label)?.id ?? null;
+  return next;
+}
+
+export function updateTempo(project: RapRhythmProject, bpm: number): RapRhythmProject {
+  const next = cloneProject(project);
+  next.canonical_state.tempo_map.bpm = bpm;
+  next.canonical_state.tempo_map = recomputeBars(next.canonical_state.tempo_map);
+  next.canonical_state.rhythm_events = next.canonical_state.rhythm_events.map((event) =>
+    recalculateEvent(event, next.canonical_state.tempo_map)
+  );
+  return next;
+}
+
+export function shiftDownbeat(project: RapRhythmProject, deltaBeats: number): RapRhythmProject {
+  const next = cloneProject(project);
+  next.canonical_state.tempo_map.downbeat_offset_beats =
+    (next.canonical_state.tempo_map.downbeat_offset_beats + deltaBeats + BEATS_PER_BAR) % BEATS_PER_BAR;
+  next.canonical_state.rhythm_events = next.canonical_state.rhythm_events.map((event) =>
+    recalculateEvent(
+      {
+        ...event,
+        quantized_start_beats: Math.max(0, event.quantized_start_beats + deltaBeats)
+      },
+      next.canonical_state.tempo_map
+    )
+  );
+  return next;
+}
+
+export function addBarAtTime(project: RapRhythmProject, seconds: number): RapRhythmProject {
+  const next = cloneProject(project);
+  const bars = [...next.canonical_state.tempo_map.bars, {
+    index: next.canonical_state.tempo_map.bars.length,
+    start_seconds: seconds,
+    end_seconds: seconds + beatSeconds(next.canonical_state.tempo_map) * BEATS_PER_BAR,
+    beat_start_index: next.canonical_state.tempo_map.bars.length * BEATS_PER_BAR,
+    beat_count: BEATS_PER_BAR,
+    confidence: 0.5
+  }].sort((a, b) => a.start_seconds - b.start_seconds);
+  next.canonical_state.tempo_map.bars = bars.map((bar, index) => ({ ...bar, index }));
+  next.canonical_state.bar_edits.push({
+    bar_index: next.canonical_state.tempo_map.bars.length - 1,
+    start_seconds: seconds,
+    end_seconds: seconds + beatSeconds(next.canonical_state.tempo_map) * BEATS_PER_BAR
+  });
+  return next;
+}
+
+export function removeLastBar(project: RapRhythmProject): RapRhythmProject {
+  const next = cloneProject(project);
+  next.canonical_state.tempo_map.bars = next.canonical_state.tempo_map.bars.slice(0, -1);
+  return next;
+}
+
+export function updateBar(project: RapRhythmProject, barIndex: number, start: number, end: number): RapRhythmProject {
+  const next = cloneProject(project);
+  next.canonical_state.tempo_map.bars = next.canonical_state.tempo_map.bars.map((bar) =>
+    bar.index === barIndex ? { ...bar, start_seconds: start, end_seconds: Math.max(end, start + 0.1) } : bar
+  );
+  const existing = next.canonical_state.bar_edits.find((edit) => edit.bar_index === barIndex);
+  if (existing) {
+    existing.start_seconds = start;
+    existing.end_seconds = end;
+  } else {
+    next.canonical_state.bar_edits.push({ bar_index: barIndex, start_seconds: start, end_seconds: end });
+  }
+  return next;
+}
+
+export function updateZoom(project: RapRhythmProject, zoom: number): RapRhythmProject {
+  const next = cloneProject(project);
+  next.ui_state.zoom = zoom;
+  return next;
+}
